@@ -7,7 +7,7 @@ import plotly.graph_objs as go
 # -----------------------------
 # Serial Port Settings
 # -----------------------------
-PORT = "COM9"     # change if needed
+PORT = "COM7"     # change if needed
 BAUD = 115200
 
 ser = serial.Serial(PORT, BAUD, timeout=1)
