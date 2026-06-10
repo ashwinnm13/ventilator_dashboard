@@ -2,20 +2,22 @@ import serial
 import threading
 from collections import deque
 from dash import Dash, dcc, html
+from dash.dependencies import Output, Input
 import plotly.graph_objs as go
 
 # -----------------------------
 # Serial Port Settings
 # -----------------------------
-PORT = "COM7"     # change if needed
+PORT = "COM9"      # Change if needed
 BAUD = 115200
 
-ser = serial.Serial(PORT, BAUD, timeout=1)
+ser = None
 
 # -----------------------------
 # Data Buffers
 # -----------------------------
 max_len = 200
+
 time_data = deque(maxlen=max_len)
 temp_data = deque(maxlen=max_len)
 hum_data = deque(maxlen=max_len)
@@ -26,9 +28,14 @@ heater_data = deque(maxlen=max_len)
 # Background Serial Reader
 # -----------------------------
 def read_serial():
+    global ser
+
     while True:
         try:
-            line = ser.readline().decode().strip()
+            if ser is None or not ser.is_open:
+                continue
+
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
 
             if "," not in line:
                 continue
@@ -50,10 +57,8 @@ def read_serial():
             abs_data.append(abs_h)
             heater_data.append(heater)
 
-        except:
-            pass
-
-threading.Thread(target=read_serial, daemon=True).start()
+        except Exception as e:
+            print("Serial Read Error:", e)
 
 # -----------------------------
 # Dash App
@@ -66,47 +71,50 @@ def heater_color(state):
 app.layout = html.Div([
     html.H1("Ventilator Dashboard — Live Sensor Data"),
 
-    # Heater Indicator
-    html.Div(id="heater-indicator", style={
-        "width": "200px",
-        "height": "60px",
-        "fontSize": "28px",
-        "fontWeight": "bold",
-        "color": "white",
-        "textAlign": "center",
-        "lineHeight": "60px",
-        "borderRadius": "10px",
-        "marginBottom": "20px"
-    }),
+    html.Div(
+        id="heater-indicator",
+        style={
+            "width": "220px",
+            "height": "60px",
+            "fontSize": "28px",
+            "fontWeight": "bold",
+            "color": "white",
+            "textAlign": "center",
+            "lineHeight": "60px",
+            "borderRadius": "10px",
+            "marginBottom": "20px",
+        }
+    ),
 
-    dcc.Graph(id='temp-graph'),
-    dcc.Graph(id='hum-graph'),
-    dcc.Graph(id='abs-graph'),
-    dcc.Graph(id='heater-graph'),
+    dcc.Graph(id="temp-graph"),
+    dcc.Graph(id="hum-graph"),
+    dcc.Graph(id="abs-graph"),
+    dcc.Graph(id="heater-graph"),
 
-    dcc.Interval(id='interval', interval=1000, n_intervals=0)
+    dcc.Interval(
+        id="interval",
+        interval=1000,
+        n_intervals=0
+    )
 ])
 
 @app.callback(
     [
-        dcc.Output('heater-indicator', 'children'),
-        dcc.Output('heater-indicator', 'style'),
-        dcc.Output('temp-graph', 'figure'),
-        dcc.Output('hum-graph', 'figure'),
-        dcc.Output('abs-graph', 'figure'),
-        dcc.Output('heater-graph', 'figure')
+        Output("heater-indicator", "children"),
+        Output("heater-indicator", "style"),
+        Output("temp-graph", "figure"),
+        Output("hum-graph", "figure"),
+        Output("abs-graph", "figure"),
+        Output("heater-graph", "figure"),
     ],
-    [dcc.Input('interval', 'n_intervals')]
+    [Input("interval", "n_intervals")]
 )
 def update_graph(_):
-    if len(heater_data) == 0:
-        heater_state = 0
-    else:
-        heater_state = heater_data[-1]
 
-    # Heater indicator styling
+    heater_state = heater_data[-1] if heater_data else 0
+
     indicator_style = {
-        "width": "200px",
+        "width": "220px",
         "height": "60px",
         "fontSize": "28px",
         "fontWeight": "bold",
@@ -115,24 +123,47 @@ def update_graph(_):
         "lineHeight": "60px",
         "borderRadius": "10px",
         "marginBottom": "20px",
-        "backgroundColor": heater_color(heater_state)
+        "backgroundColor": heater_color(heater_state),
     }
 
-    # Graphs
-    fig_temp = go.Figure(data=[go.Scatter(x=list(time_data), y=list(temp_data), mode='lines')])
+    fig_temp = go.Figure(
+        data=[go.Scatter(
+            x=list(time_data),
+            y=list(temp_data),
+            mode="lines"
+        )]
+    )
     fig_temp.update_layout(title="Temperature (°C)")
 
-    fig_hum = go.Figure(data=[go.Scatter(x=list(time_data), y=list(hum_data), mode='lines')])
+    fig_hum = go.Figure(
+        data=[go.Scatter(
+            x=list(time_data),
+            y=list(hum_data),
+            mode="lines"
+        )]
+    )
     fig_hum.update_layout(title="Relative Humidity (%)")
 
-    fig_abs = go.Figure(data=[go.Scatter(x=list(time_data), y=list(abs_data), mode='lines')])
+    fig_abs = go.Figure(
+        data=[go.Scatter(
+            x=list(time_data),
+            y=list(abs_data),
+            mode="lines"
+        )]
+    )
     fig_abs.update_layout(title="Absolute Humidity (g/m³)")
 
-    fig_heater = go.Figure(data=[go.Scatter(x=list(time_data), y=list(heater_data), mode='lines')])
+    fig_heater = go.Figure(
+        data=[go.Scatter(
+            x=list(time_data),
+            y=list(heater_data),
+            mode="lines"
+        )]
+    )
     fig_heater.update_layout(title="Heater State (1 = ON, 0 = OFF)")
 
     return (
-        "HEATER ON" if heater_state == 1 else "HEATER OFF",
+        "HEATER ON" if heater_state else "HEATER OFF",
         indicator_style,
         fig_temp,
         fig_hum,
@@ -140,5 +171,27 @@ def update_graph(_):
         fig_heater
     )
 
+# -----------------------------
+# Main
+# -----------------------------
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    try:
+        print(f"Opening serial port {PORT}...")
+
+        ser = serial.Serial(PORT, BAUD, timeout=1)
+
+        print("Serial port opened successfully.")
+
+        threading.Thread(
+            target=read_serial,
+            daemon=True
+        ).start()
+
+        app.run(
+            debug=True,
+            use_reloader=False
+        )
+
+    except Exception as e:
+        print("Failed to open serial port:")
+        print(e)
